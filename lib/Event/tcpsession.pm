@@ -10,7 +10,10 @@ use Event::Watcher qw(R W T);
 require Event::io;
 use base 'Event::io';
 use vars qw($VERSION);
-$VERSION = '0.13';
+$VERSION = '0.14';
+
+use constant DEBUG_SHOW_RPCS => 0;
+use constant DEBUG_BYTES => 0;
 
 use constant PROTOCOL_VERSION => 2;
 use constant RECONNECT_TM => 3;
@@ -82,7 +85,6 @@ sub fd {
 	    if (!defined $fd) {
 		# This is a special case for regression testing.
 		# Who knows, maybe it is generally useful too.
-		$o->stop;
 		close $o->fd;
 		$o->SUPER::fd(undef)
 	    } else {
@@ -156,7 +158,6 @@ sub disconnect {
 	return 1;
     }
     $o->{status_cb}->($o, 'disconnect', $why);
-    $o->fd(undef);
     $o->connect_to_server;
 }
 
@@ -169,12 +170,12 @@ sub connect_to_server {
     if (!connect($fd, sockaddr_in($o->{port}, $o->{iaddr}))) {
 	$o->{status_cb}->($o, 'connect', $!);
 	$o->timeout(RECONNECT_TM);
-	$o->start;
 	$o->cb([$o,'connect_to_server']);
+	$o->start;
 	return
     }
-    $o->{status_cb}->($o, 'connect');
     $o->fd($fd);
+    $o->{status_cb}->($o, 'connect');
     $o->reconnected;
     1
 }
@@ -183,7 +184,6 @@ sub reconnected {
     my ($o) = @_;
 
     $o->timeout(undef);
-    $o->start;
     delete $o->{pend};
     delete $o->{peer_version};
     delete $o->{peer_api};
@@ -201,12 +201,13 @@ sub reconnected {
     # reload pending transactions
     # (anything not requiring acknowledgement gets/got ignored)
     while (my ($tx,$i) = each %{$o->{pend}}) {
-	warn "pend $i->[0]{name}";
+	# warn "pend $i->[0]{name}";
 	append_obuf($o, $tx, $i->[2]);
     }
 
     $o->poll(R|W);
     $o->cb([$o,'service']);
+    $o->start;
 }
 
 #########################################################################
@@ -215,8 +216,6 @@ sub append_obuf {    # function call
     my ($o, $tx, $m) = @_;
     # length is inclusive
     my $mlen = length $m;
-#    confess "$mlen > 32000"
-#	if $mlen > 32000;
     $o->{obuf} .= pack(HEADER_FORMAT, 6+$mlen, $tx) . $m;
 
     $o->poll($o->poll | W);
@@ -249,12 +248,10 @@ sub unpack_args {
 sub service {
     my ($o, $e) = @_;
     my $w = $e->w;
-    if ($e->got & T) {
-	return if $o->disconnect("inactivity")
-    }
-    if (!defined $w->fd) {
-	return if $o->disconnect("fd closed")
-    }
+    return $o->disconnect("inactivity")
+	if $e->got & T;
+    return $o->disconnect("fd closed")
+	if !defined $w->fd;
     if ($e->got & R) {
 	my $buf = $o->{ibuf};
 	while (1) {
@@ -263,10 +260,13 @@ sub service {
 	    last if $!{EAGAIN};
 	    return $o->disconnect("sysread ret=$ret, $!");
 	}
+	#warn "$$:R:".unpack('h*', $buf).":";
 	# decode $buf
 	if (!exists $o->{peer_version} and length $buf >= 2) {
 	    # check PROTOCOL_VERSION ...
 	    $o->{peer_version} = unpack 'n', substr($buf, 0, 2);
+	    warn "$$:peer_version=$o->{peer_version}"
+		if DEBUG_SHOW_RPCS;
 	    $buf = substr $buf, 2;
 	    $o->disconnect("peer version mismatch $o->{peer_version} != ".
 			   PROTOCOL_VERSION)
@@ -288,7 +288,10 @@ sub service {
 		    next
 		}
 		# EVAL
-		$api->{code}->($o, unpack_args($api->{req}, $m));
+		my @args = unpack_args($api->{req}, $m);
+		warn "$$:Run($opid)(".join(', ', @args).")"
+		    if DEBUG_SHOW_RPCS;
+		$api->{code}->($o, @args);
 
 	    } elsif ($tx < RESERVED_IDS) {
 		if ($tx == APIMAP_ID) {
@@ -304,7 +307,8 @@ sub service {
 			    warn "got strange API spec: ".join(', ',@spec);
 			}
 		    }
-		    # warn "got ".(0+@api)." APIs";
+		    warn "$$: ".(0+@api)." APIs"
+			if DEBUG_SHOW_RPCS;
 		    $o->{peer_api} = \@api;
 		    my %peer_opname;
 		    for (my $x=0; $x < @api; $x++) {
@@ -328,8 +332,13 @@ sub service {
 			next
 		    }
 		    # EVAL
-		    my @ret = $api->{code}->($o, unpack_args($api->{req}, $m));
-		    # what if exception?
+		    my @args = unpack_args($api->{req}, $m);
+		    warn "$$:Run($opid)(".join(", ", @args).") returning..."
+			if DEBUG_SHOW_RPCS;
+		    my @ret = $api->{code}->($o, @args);
+		    # what if exception? XXX
+		    warn "$$:Return($opid)(".join(", ", @ret).")"
+			if DEBUG_SHOW_RPCS;
 		    my $packed_ret = pack_args($api->{reply}, @ret);
 		    warn("'$api->{name}' returned (".join(', ',@ret).
 			 " yet doesn't have a reply pack template")
@@ -345,7 +354,10 @@ sub service {
 		    my ($api,$cb) = @$pend;
 		    my $opid = unpack 'n', $m; # can double check opid XXX
 		    # EVAL
-		    $cb->($o, unpack_args($api->{reply}, substr($m, 2)));
+		    my @args= unpack_args($api->{reply}, substr($m, 2));
+		    warn "$$:RunReply($opid)(".join(", ", @args).")"
+			if DEBUG_SHOW_RPCS;
+		    $cb->($o, @args);
 		}
 	    }
 	}
@@ -360,6 +372,8 @@ sub service {
 	    return $o->disconnect("syswrite: $!")
 	}
 	if ($sent) {
+	    warn "$$:W:".unpack('h*', substr($buf, 0, $sent)).":"
+		if DEBUG_BYTES;
 	    $buf = substr $buf, $sent;
 	    $o->{obuf} = $buf;
 	}
@@ -378,7 +392,8 @@ sub rpc {
     my $o = shift;
     if (!defined $o->fd or !exists $o->{peer_opname}) {
 	my @copy = @_;
-	#warn "delay $copy[0]";
+	#my $fileno = $o->fd? fileno($o->fd) : 'undef';
+	#warn "$$: delay $copy[0] ($fileno, $o->{peer_opname})";
 	push @{$o->{delayed}}, \@copy;
 	return;
     }
@@ -404,6 +419,8 @@ sub rpc {
 	$save = $o->{pend}{$tx} = [$api, shift];
     }
 
+    warn "$$:Call($id)(".join(", ", @_).")"
+	if DEBUG_SHOW_RPCS;
     my $packed_args = pack_args($api->{req}, @_);
     croak("Attempt to invoke '$opname' with (".join(', ', @_).
 	  ") without pack template")

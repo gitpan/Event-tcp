@@ -2,10 +2,18 @@
 use strict;
 use Test;
 use Event qw(loop unloop);
+use Event::type qw(tcplisten tcpsession);
+
+my $debug=0;
+if ($debug) {
+    require NetServer::ProcessTop;
+}
 
 my $port = 7000 + int rand 2000;
 my $pid;
 if (($pid=fork) == 0) { # SERVER (child)
+    'NetServer::ProcessTop'->import()
+	if $debug;
     #sleep 1;
 
     my $finishing;
@@ -25,7 +33,7 @@ if (($pid=fork) == 0) { # SERVER (child)
 
     Event->tcplisten(port => $port, cb => sub {
 			 my ($w, $sock) = @_;
-			 #warn "client on ".fileno($sock);
+			 # warn "client on ".fileno($sock);
 			 my $o = Event->tcpsession(desc => 'server',
 						   fd => $sock, api => $api);
 		     });
@@ -38,6 +46,9 @@ if (($pid=fork) == 0) { # SERVER (child)
     exit loop();
 
 } else {  # CLIENT
+    'NetServer::ProcessTop'->import()
+	if $debug;
+    # $Event::DebugLevel = 4;
     my $Tests = 14;
     plan test => $Tests;
 
@@ -47,13 +58,16 @@ if (($pid=fork) == 0) { # SERVER (child)
 
     my $c = Event->tcpsession(desc => 'client', port => $port, api => $api,
 			      cb => sub {
+				  my ($w) = @_;
 				  $_[2] ||= 'ok';
-				  # warn "$_[1]: $_[2]\n";
+				  my $fn = $w->fd? fileno($w->fd) : 'undef';
+				  # warn "Status: fd=$fn $_[1], $_[2]\n";
 			      });
     ok ref $c, 'Event::tcpsession';
     
-    Event->timer(desc => 'break connection', after => 3, cb => sub {
+    Event->timer(desc => 'break connection', after => 4, cb => sub {
 		     $c->fd(undef);  # (oops! :-)
+		     # $c->debug(1);
 		     $c->now;        # otherwise wont notice
 		     #warn "Broke connection in order to test recovery...\n";
 		     $c->rpc('finishing');
@@ -65,9 +79,10 @@ if (($pid=fork) == 0) { # SERVER (child)
     Event->timer(interval => 1, cb => sub {
 		     shift->w->cancel
 			 if ++$tickled > 10;
+		     my $expect = $tickled;
 		     $c->rpc('tickle', sub {
 				 my ($o,$got) = @_; 
-				 ok $got, 'he' x $tickled;
+				 ok $got, 'he' x $expect;
 			     }, $tickled);
 		 });
 
