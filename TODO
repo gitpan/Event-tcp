@@ -1,0 +1,12 @@
+sub sanitize {
+    my ($s) = @_;
+    $s =~ s/([\0-\11\13-\37\177])/sprintf("^%c",ord($1)^64)/eg;
+    $s;
+}
+
+make TcpSession bi-directional; factor out code from tcpserv.pm!
+
+server side needs to know which network interface to use
+
+more (some!) documentation
+
