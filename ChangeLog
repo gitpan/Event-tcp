@@ -1,3 +1,13 @@
+1999-10-08  Joshua Pritikin  <joshua.pritikin@db.com>
+
+	* Release 0.11.
+
+1999-10-05  Joshua Pritikin  <joshua.pritikin@db.com>
+
+	* Check for overflow (the initial protocol maxs out at 32k).
+
+	* Rename tcpserv -> tcplisten.
+
 1999-09-10  Joshua Pritikin  <joshua.pritikin@db.com>
 
 	* Release 0.10.

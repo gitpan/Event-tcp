@@ -1,9 +1,9 @@
-check for 16bit overflows
+cope with >32k rpcs
 
-split out tcpserv?
+eval protection
+
+split out tcplisten?
 
 server side needs to know which network interface to use?
 
 more (some!) documentation
-
-

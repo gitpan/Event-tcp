@@ -1,5 +1,5 @@
 use strict;
-package Event::tcpserv;
+package Event::tcplisten;
 use Carp;
 use Symbol;
 use Socket;

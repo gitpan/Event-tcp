@@ -10,7 +10,7 @@ use Event::Watcher qw(R W T);
 require Event::io;
 use base 'Event::io';
 use vars qw($VERSION);
-$VERSION = '0.10';
+$VERSION = '0.11';
 
 use constant PROTOCOL_VERSION => 1;
 use constant RECONNECT_TM => 3;
@@ -51,6 +51,8 @@ sub is_server_side { # make function call XXX
 # They are also used for special messages.  Special messages
 # only use low-order IDs.  The special range from
 # [0x8000, 0x8000 + RESERVEDIDS) is unused.
+#
+# use 1 bit to distinguish short/long messages? XXX
 #
 sub get_next_transaction_id {
     my ($o) = @_;
@@ -207,7 +209,10 @@ sub reconnected {
 sub append_obuf {    # function call
     my ($o, $tx, $m) = @_;
     # length is inclusive
-    $o->{obuf} .= pack('nn', 4+length $m, $tx) . $m;
+    my $mlen = length $m;
+    confess "$mlen > 32000"
+	if $mlen > 32000;
+    $o->{obuf} .= pack('nn', 4+$mlen, $tx) . $m;
 
     $o->poll($o->poll | W);
 }
@@ -277,6 +282,7 @@ sub service {
 		    warn "API $opid not found (ignored)";
 		    next
 		}
+		# EVAL
 		$api->{code}->($o, unpack_args($api->{req}, $m));
 
 	    } elsif ($tx < RESERVED_IDS) {
@@ -316,7 +322,9 @@ sub service {
 			warn "API $opid not found (ignored)";
 			next
 		    }
+		    # EVAL
 		    my @ret = $api->{code}->($o, unpack_args($api->{req}, $m));
+		    # what if exception?
 		    my $packed_ret = pack_args($api->{reply}, @ret);
 		    warn("'$api->{name}' returned (".join(', ',@ret).
 			 " yet doesn't have a reply pack template")
@@ -331,6 +339,7 @@ sub service {
 		    }
 		    my ($api,$cb) = @$pend;
 		    my $opid = unpack 'n', $m; # can double check opid XXX
+		    # EVAL
 		    $cb->($o, unpack_args($api->{reply}, substr($m, 2)));
 		}
 	    }
@@ -372,8 +381,9 @@ sub rpc {
     confess "No opname?"
 	if !$opname;
     my $id = $o->{peer_opname}{$opname};
-    croak "'$opname' not found on peer"
-	if !defined $id;
+    croak "'$opname' not found on peer (".
+	join(' ', sort keys %{$o->{peer_opname}}).")"
+	    if !defined $id;
 
     my $api = $o->{peer_api}[$id];
 

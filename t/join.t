@@ -23,12 +23,12 @@ if (($pid=fork) == 0) { # SERVER (child)
 	     } },
 	      ];
 
-    Event->tcpserv(port => $port, cb => sub {
-		       my ($w, $sock) = @_;
-		       #warn "client on ".fileno($sock);
-		       my $o = Event->tcpsession(desc => 'server',
-						 fd => $sock, api => $api);
-		   });
+    Event->tcplisten(port => $port, cb => sub {
+			 my ($w, $sock) = @_;
+			 #warn "client on ".fileno($sock);
+			 my $o = Event->tcpsession(desc => 'server',
+						   fd => $sock, api => $api);
+		     });
 
     Event->timer(desc => 'shutdown', interval => 1, cb => sub {
 		     my $c = grep { ref eq 'Event::tcpsession' } Event::all_watchers;
