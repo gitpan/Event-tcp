@@ -1,50 +1,83 @@
 #!./perl
 use strict;
-use warning;
-use Test; plan test => 3;
-
+use Test;
 use Event qw(loop unloop);
 
 my $port = 7000 + int rand 2000;
+my $pid;
+if (($pid=fork) == 0) { # SERVER (child)
+    #sleep 1;
 
-if (fork == 0) { #child
-    sleep 1;
+    my $finishing;
+    my $api = [
+	   { name => 'hello', reply=>'', code => sub { 'world' } },
+	   {
+	    name => 'tickle', req => 'n', reply => '', code => sub {
+		'he' x $_[1]
+	    }
+	   },
+	   { name => 'finishing', code => sub {
+		 my ($o) = @_;
+		 $finishing=1;
+		 $o->rpc('ok', 1);
+	     } },
+	      ];
 
-    my $serv = Event->tcpserv(e_port => $port, e_cb => \&accept_connection);
+    Event->tcpserv(port => $port, cb => sub {
+		       my ($w, $sock) = @_;
+		       #warn "client on ".fileno($sock);
+		       my $o = Event->tcpsession(desc => 'server',
+						 fd => $sock, api => $api);
+		   });
 
-    sub accept_connection {
-	my ($w, $sock) = @_;
-	Event->io(e_fd => $sock, e_poll => 'r', e_cb => \&close_connection);
-    }
-
-    sub close_connection {
-	my ($e) = @_;
-	close $e->w->{e_fd};
-	unloop(0);
-    }
+    Event->timer(desc => 'shutdown', interval => 1, cb => sub {
+		     my $c = grep { ref eq 'Event::tcpsession' } Event::all_watchers;
+		     unloop(0) if ($finishing and $c == 0);
+		 });
 
     exit loop();
 
-} else {
-    my $state=0;
-    my $c = Event->tcpclient(e_port => $port, e_cb => \&send_stuff,
-			    e_comm_cb => \&comm_cb);
-    ok ref $c, 'Event::tcpclient';
+} else {  # CLIENT
+    my $Tests = 14;
+    plan test => $Tests;
+
+    my $api = [
+	   { name => 'ok', req => 'n', code => sub { ok $_[1] } },
+	      ];
+
+    my $c = Event->tcpsession(desc => 'client', port => $port, api => $api,
+			      cb => sub {
+				  $_[2] ||= 'ok';
+				  # warn "$_[1]: $_[2]\n";
+			      });
+    ok ref $c, 'Event::tcpsession';
     
-    #setsockopt($c->{e_fd}, IPPROTO_TCP, TCP_NODELAY, pack('l',1))
-    #	or die "setsockopt: $!";
+    Event->timer(desc => 'break', after => 3, cb => sub {
+		     $c->fd(undef);  # (oops! :-)
+		     $c->now;        # otherwise wont notice
+		     #warn "Broke connection in order to test recovery...\n";
+		     $c->rpc('finishing');
+		 });
 
-    sub comm_cb {
-	my ($w, $st) = @_;
-	ok $st, $state;
-	++$state;
-    }
+    $c->rpc('hello', sub{ ok $_[1], 'world'; });
 
-    sub send_stuff {
-	my ($e) = @_;
-	syswrite $e->w->{e_fd}, '*', 1;
-	unloop();
-    }
+    my $tickled=1;
+    Event->timer(interval => 1, cb => sub {
+		     shift->w->cancel
+			 if ++$tickled > 10;
+		     $c->rpc('tickle', sub {
+				 my ($o,$got) = @_; 
+				 ok $got, 'he' x $tickled;
+			     }, $tickled);
+		 });
 
-    loop(); wait;
+    Event->timer(desc => 'shutdown', interval => .5, cb => sub {
+		     unloop if $Test::ntest > $Tests-1
+		 });
+
+    loop();
+    $c->fd(undef);
+
+    #warn "Waiting for $pid...";
+    wait; ok !$?;
 }
