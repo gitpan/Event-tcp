@@ -52,7 +52,7 @@ if (($pid=fork) == 0) { # SERVER (child)
 			      });
     ok ref $c, 'Event::tcpsession';
     
-    Event->timer(desc => 'break', after => 3, cb => sub {
+    Event->timer(desc => 'break connection', after => 3, cb => sub {
 		     $c->fd(undef);  # (oops! :-)
 		     $c->now;        # otherwise wont notice
 		     #warn "Broke connection in order to test recovery...\n";

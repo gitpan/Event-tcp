@@ -5,12 +5,12 @@ use Symbol;
 use Socket;
 use Ioctl qw(FIONBIO);
 use Errno qw(EAGAIN);
-use Event 0.53;
+use Event 0.61;
 use Event::Watcher qw(R W T);
 require Event::io;
 use base 'Event::io';
 use vars qw($VERSION);
-$VERSION = '0.12';
+$VERSION = '0.13';
 
 use constant PROTOCOL_VERSION => 2;
 use constant RECONNECT_TM => 3;
@@ -33,7 +33,7 @@ sub new {
     my @passthru;
     push @passthru, desc => $p{desc} if
 	exists $p{desc};
-    my $o = $class->SUPER::new(reentrant => 0, @passthru);
+    my $o = $class->SUPER::new(parked => 1, reentrant => 0, @passthru);
     $o->{status_cb} = $p{cb} || sub {};
     $o->{api} = $p{api} || [];
     $o->{delayed} = [];
@@ -82,6 +82,7 @@ sub fd {
 	    if (!defined $fd) {
 		# This is a special case for regression testing.
 		# Who knows, maybe it is generally useful too.
+		$o->stop;
 		close $o->fd;
 		$o->SUPER::fd(undef)
 	    } else {
@@ -168,6 +169,7 @@ sub connect_to_server {
     if (!connect($fd, sockaddr_in($o->{port}, $o->{iaddr}))) {
 	$o->{status_cb}->($o, 'connect', $!);
 	$o->timeout(RECONNECT_TM);
+	$o->start;
 	$o->cb([$o,'connect_to_server']);
 	return
     }
@@ -181,6 +183,7 @@ sub reconnected {
     my ($o) = @_;
 
     $o->timeout(undef);
+    $o->start;
     delete $o->{pend};
     delete $o->{peer_version};
     delete $o->{peer_api};

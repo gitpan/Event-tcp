@@ -1,4 +1,4 @@
-#!./perl -w
+#!/usr/bin/env perl -w
 
 # This script checks the symmetry of pack/unpack templates.
 
@@ -24,14 +24,16 @@ sub check_symmetry {
 	    }
 	}
     }
+    print "packed as: |".xray($packed)."|\n";
     if ($no) {
-	print xray($packed)."\n";
 	my $max = @_ > @got? @_ : @got;
 	for (my $x=0; $x < $max; $x++) {
-	    printf("%02d %30s %30s", $x,
+	    printf("%02d %30s %30s\n", $x,
 		   xray($_[$x] || ''), xray($got[$x] || ''));
 	}
+    } else {
+	print "ok\n";
     }
 }
 
-check_symmetry('n N d', 1,2,3);
+check_symmetry($ARGV[0], 1..5);
