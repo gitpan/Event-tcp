@@ -1,3 +1,13 @@
+1999-10-27  Joshua Pritikin  <joshua.pritikin@db.com>
+
+	* Release 0.12.
+
+	* Add Ioctl to PREREQ_PM (eserte@cs.tu-berlin.de).
+
+	* Fix left over mention of _default_state_cb (rezic@onlineoffice.de).
+
+	* Use 4 byte lengths.  The 32k limit is history.
+
 1999-10-08  Joshua Pritikin  <joshua.pritikin@db.com>
 
 	* Release 0.11.

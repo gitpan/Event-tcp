@@ -1,5 +1,3 @@
-cope with >32k rpcs
-
 eval protection
 
 split out tcplisten?

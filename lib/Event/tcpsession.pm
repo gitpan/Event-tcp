@@ -10,10 +10,12 @@ use Event::Watcher qw(R W T);
 require Event::io;
 use base 'Event::io';
 use vars qw($VERSION);
-$VERSION = '0.11';
+$VERSION = '0.12';
 
-use constant PROTOCOL_VERSION => 1;
+use constant PROTOCOL_VERSION => 2;
 use constant RECONNECT_TM => 3;
+
+use constant HEADER_FORMAT => 'Nn';
 
 # special message IDs
 use constant NOREPLY_ID     => 0;
@@ -128,7 +130,7 @@ sub set_peer {
 	$o->{iaddr} = $iaddr;
 	$o->{port} = $port;
 
-	$o->_default_state_cb(0)
+	$o->{status_cb}->($o, 'not available')
 	    if !$o->connect_to_server;
 
     } elsif (exists $p{fd}) {
@@ -210,9 +212,9 @@ sub append_obuf {    # function call
     my ($o, $tx, $m) = @_;
     # length is inclusive
     my $mlen = length $m;
-    confess "$mlen > 32000"
-	if $mlen > 32000;
-    $o->{obuf} .= pack('nn', 4+$mlen, $tx) . $m;
+#    confess "$mlen > 32000"
+#	if $mlen > 32000;
+    $o->{obuf} .= pack(HEADER_FORMAT, 6+$mlen, $tx) . $m;
 
     $o->poll($o->poll | W);
 }
@@ -267,10 +269,10 @@ sub service {
 			   PROTOCOL_VERSION)
 		if $o->{peer_version} != PROTOCOL_VERSION;
 	}
-	while (length $buf >= 4) {
-	    my ($len, $tx) = unpack 'nn', $buf;
+	while (length $buf >= 6) {
+	    my ($len, $tx) = unpack HEADER_FORMAT, $buf;
 	    last if length $buf < $len;  # got a complete message?
-	    my $m = substr $buf, 4, $len-4;
+	    my $m = substr $buf, 6, $len-6;
 
 	    $buf = substr $buf, $len; # snip
 
